@@ -1,0 +1,142 @@
+---
+title: "data_wrangling_ii"
+author: emanuel clemente
+output: github_document
+date: "2026-10-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rvest)      # web scraping: reads HTML pages and extracts tables, text, etc.
+library(httr)       # sends requests to web APIs (GET) and reads their responses
+
+```
+
+## Extracting Tables
+
+### Importing NSDUH
+
+```{r}
+
+# Web address of the page to scrape (National Survey on Drug Use and Health tables)
+
+url = "https://www.samhsa.gov/data/sites/default/files/NSDUHsaeShortTermCHG2015/NSDUHsaeShortTermCHG2015.htm"
+
+# read_html() downloads the page and stores its HTML structure as an R object
+
+drug_use_html =
+  read_html(url)
+```
+
+### Pulling Tables
+
+```{r}
+
+marj_df = 
+  drug_use_html |> 
+  html_table() |>   # extracts EVERY table on the page, returned as a list of tibbles
+  first() |>        # keeps only the first table in that list (marijuana use)
+  slice(-1)         # slice() keeps rows by position; -1 DROPS row 1, which holds a table note, not data
+```
+
+## CSS Selectors
+
+### Importing SW Data from Pulling in HTML
+
+```{r}
+
+# read_html_live() loads the page in a real (headless) browser, so content added by
+# JavaScript after the page opens is captured. Requires the chromote package and Chrome.
+
+swm_html = 
+  read_html_live("https://www.imdb.com/list/ls070150896/")
+```
+
+### Selector Gadget
+
+```{r}
+
+# CSS selectors (found with the SelectorGadget browser tool) identify page elements.
+# html_elements() finds every element matching the selector; html_text() pulls out its text.
+# Each result is a VECTOR with one entry per movie.
+
+swm_title_vec = 
+  swm_html |>
+  html_elements(".ipc-title-link-wrapper .ipc-title__text") |>   # movie titles
+  html_text()
+
+swm_metascore_vec = 
+  swm_html |>
+  html_elements(".metacritic-score-box") |>                      # Metacritic scores
+  html_text()
+
+swm_runtime_vec = 
+  swm_html |>
+  html_elements(".base .ipc-inline-list__item:nth-child(2)") |>  # nth-child(2) = 2nd item in each info list (runtime)
+  html_text()
+
+# tibble() combines the vectors into a dataframe: column name = vector.
+# The vectors must be the same length (one value per movie) and in the same order.
+
+swm_df = 
+  tibble(
+    title = swm_title_vec,
+    score = swm_metascore_vec,
+    runtime = swm_runtime_vec
+  )
+```
+
+## Using an API
+
+### Getting a .csv File
+
+```{r}
+
+# An API returns data directly instead of a web page.
+# GET() sends a request to the API URL and returns a "response" object (status, headers, content).
+
+nyc_water = 
+  GET("https://data.cityofnewyork.us/api/v3/views/ia2d-e54m/query.csv") |> 
+  content("parsed") |>   # "parsed" = httr detects the file type (here CSV) and converts it to a tibble
+  select(year:per_capita_gallons_per_person_per_day)   # keep columns from year through per-capita use
+```
+
+### Getting a JSON File
+
+```{r}
+
+# Same data, requested in JSON format (a nested, list-like format common for APIs)
+
+nyc_water_json = 
+  GET("https://data.cityofnewyork.us/api/v3/views/ia2d-e54m/query.json")
+
+nyc_water_json |>
+  content("text") |>       # extract the response as raw JSON text
+  jsonlite::fromJSON() |>  # convert the JSON text into an R data frame
+  as_tibble() |>           # convert to a tibble for tidyverse-style printing
+  select(year:per_capita_gallons_per_person_per_day)
+```
+
+### Looking at Pokemon
+
+```{r}
+
+# Request data for Pokemon #1 from the Pokemon API
+
+pokemon_json = 
+  GET("http://pokeapi.co/api/v2/pokemon/1")
+
+# With no type given, content() parses the JSON into a nested LIST, not a dataframe,
+# because this data isn't table-shaped
+
+pokemon_data = 
+  pokemon_json |>
+  content()
+
+# [[ ]] extracts one element from a list by name
+pokemon_data[["name"]]       # a single value
+pokemon_data[["height"]]     # a single value
+pokemon_data[["abilities"]]  # itself a list (a Pokemon can have several abilities)
+```
