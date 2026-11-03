@@ -1,0 +1,296 @@
+---
+title: "string and factors"
+output: github_document
+date: "2026-11-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rvest)
+library(tidyverse)
+library(stringr)
+library(p8105.datasets)
+```
+
+## Strings and Regex
+
+```{r}
+# The most frequent operation involving strings is to search for an exact match; `str_detect` is used to find cases where the match exists and often used in conjunction `filter()`;`str_replace` can be used to replace an instance of a match with something else and often used in conjuction with `mutate()`.
+
+string_vec = c("my", "name", "is", "emanuel") 
+
+str_detect(string_vec, "emanuel")
+
+str_replace(string_vec, "emanuel", "Emanuel")
+
+# For exact matches, you can designate matches at the beginning or end of a line.
+
+string_vec = c(
+  "i think we all rule for participating",
+  "i think i have been caught",
+  "i think this will be quite fun actually",
+  "it will be fun, i think"
+)
+
+str_detect(string_vec, "^i think")
+
+str_detect(string_vec, "i think$")
+
+# You can desinate a list of characters that will count as a match.
+
+string_vec = c(
+  "Time for a Pumpkin Spice Latte!",
+  "went to the #pumpkinpatch last weekend",
+  "Pumpkin Pie is obviously the best pie",
+  "SMASHING PUMPKINS --- LIVE IN CONCERT!!"
+)
+
+str_detect(string_vec,"[Pp]umpkin")
+
+# You don't have to list these; instead, you can provide a range of letters or numbers that count as a match.
+
+string_vec = c(
+  '7th inning stretch',
+  '1st half soon to begin. Texas won the toss.',
+  'she is 5 feet 4 inches tall',
+  '3AM - cant sleep :('
+)
+
+str_detect(string_vec, "^[0-9][a-zA-Z]")
+
+# The character `.` matches anything.
+
+string_vec = c(
+  'Its 7:11 in the evening',
+  'want to go to 7-11?',
+  'my flight is AA711',
+  'NetBios: scanning ip 203.167.114.66'
+)
+
+str_detect(string_vec, "7.11")
+
+# Some characters are "special." These include `[` and `]`, and `(` and `)`, and `.`. To search for these, you have to indicate they're special using `\`, which can get complicated.
+
+string_vec = c(
+  'The CI is [2, 5]',
+  ':-]',
+  ':-[',
+  'I found the answer on pages [6-7]'
+)
+
+str_detect(string_vec, "\\[")
+
+```
+
+## Thoughts on Factors
+
+```{r}
+# Factors are the way to store categorical variables in R, taking on specific levels (e.g., male and female), which are usually presented as characters but are in fact store by R as integers. These integer values are used by functions through R in making plots, organizing tables, etc.
+
+vec_sex = factor(c("male", "male", "female", "female"))
+vec_sex
+
+as.numeric(vec_sex)
+
+vec_sex = fct_relevel(vec_sex, "male")
+vec_sex
+
+as.numeric(vec_sex)
+
+# The code above illustrates coercion, which is forcing a variable from one type to another (i.e., factor to numeric). Using `forcats` helps deliberate factors.
+```
+
+## NSDUH Example
+
+```{r}
+nsduh_url = "https://www.samhsa.gov/data/sites/default/files/NSDUHsaeShortTermCHG2015/NSDUHsaeShortTermCHG2015.htm"
+
+table_marj = 
+  read_html(nsduh_url) |> 
+  html_table() |> 
+  first() |>
+  slice(-1)
+
+data_marj = 
+  table_marj |>
+  select(-contains("P Value")) |>
+  pivot_longer(
+    -State,
+    names_to = "age_year", 
+    values_to = "percent") |>
+  separate(age_year, into = c("age", "year"), sep = "\\(") |>  # `separate()` splits age and year as the open parenthesis using `"\\("`,
+  mutate(                                                      # close parenthesis is stripped out in `mutate()`.
+    year = str_replace(year, "\\)", ""),
+    percent = str_replace(percent, "[a-c]$", ""),              # to remove character superscripts, replace any character using `"[a-c]$"`.
+    percent = as.numeric(percent)) |>
+  filter(!(State %in% c("Total U.S.", "Northeast", "Midwest", "South", "West")))
+
+# To visualize data for the 12-17 age group, make a readable plot by treating `State` as a factor are reorder according to the median `Percent` value.
+
+data_marj |>
+  filter(age == "12-17") |> 
+  mutate(State = fct_reorder(State, percent)) |> 
+  ggplot(aes(x = State, y = percent, color = year)) + 
+    geom_point() + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+## Restaurant Inspections Example
+
+```{r}
+
+data("rest_inspec")
+
+rest_inspec = 
+    rest_inspec |> 
+    rename(borough = boro)
+
+rest_inspec |> 
+  group_by(borough, grade) |> 
+  summarize(n = n()) |> 
+  pivot_wider(names_from = grade, values_from = n)
+
+# To simplify, remove inspections with scores other than `A`, `B`, or `C`, and remove the restaurants with missing borough information; also clean up borough names
+
+rest_inspec =
+  rest_inspec |>
+  filter(grade %in% c("A", "B", "C"), borough != "Missing") |> 
+  mutate(borough = str_to_title(borough))
+
+# To focus only a pizza places and re-examine grades by borough
+
+rest_inspec |> 
+  filter(str_detect(dba, "Pizza")) |> 
+  group_by(borough, grade) |> 
+  summarize(n = n()) |> 
+  pivot_wider(names_from = grade, values_from = n)
+
+# Identify the problem: the match in `str_detect()` is case-sensitive until it is told not to be
+
+rest_inspec |> 
+  filter(str_detect(dba, "[Pp][Ii][Zz][Zz][Aa]")) |> 
+  group_by(borough, grade) |> 
+  summarize(n = n()) |> 
+  pivot_wider(names_from = grade, values_from = n)
+
+# Visualizing the table
+
+rest_inspec |> 
+  filter(str_detect(dba, "[Pp][Ii][Zz][Zz][Aa]")) |>
+  ggplot(aes(x = borough, fill = grade)) + 
+  geom_bar() 
+
+# Updating the plot to visualize things in a different order  using `fct_infreq()`
+
+rest_inspec |> 
+  filter(str_detect(dba, "[Pp][Ii][Zz][Zz][Aa]")) |>
+  mutate(borough = fct_infreq(borough)) |>
+  ggplot(aes(x = borough, fill = grade)) + 
+  geom_bar() 
+
+# To rename a borough, use `str_replace()`
+
+rest_inspec |> 
+  filter(str_detect(dba, "[Pp][Ii][Zz][Zz][Aa]")) |>
+  mutate(
+    borough = fct_infreq(borough),
+    borough = str_replace(borough, "Manhattan", "The City")) |>
+  ggplot(aes(x = borough, fill = grade)) + 
+  geom_bar() 
+
+# Renaming the borough through this approach also converts the result back to a string which, when plotted, will implicitly make a factor and order alphabetically. In Base R, `replace()` is used to resolve this, but might not always work.
+
+rest_inspec |> 
+  filter(str_detect(dba, "[Pp][Ii][Zz][Zz][Aa]")) |>
+  mutate(
+    borough = fct_infreq(borough),
+    borough = replace(borough, which(borough == "Manhattan"), "The City")) |>
+  ggplot(aes(x = borough, fill = grade)) + 
+  geom_bar()
+
+# The above pipeline did not work as factors have very specific values and trying to use a value that is not an existing factor level won't work.
+
+# the following function for renaming factor levels:
+
+rest_inspec |> 
+  filter(str_detect(dba, regex("pizza", ignore_case = TRUE))) |>
+  mutate(
+    borough = fct_infreq(borough),
+    borough = fct_recode(borough, "The City" = "Manhattan")) |>
+  ggplot(aes(x = borough, fill = grade)) + 
+  geom_bar()
+```
+
+## Weather Data Example
+
+```{r}
+
+data("weather_df")
+
+# The following pipeline reorders `name` by hand using `fct_relevel()`
+
+weather_df |>
+  mutate(name = forcats::fct_relevel(name, c("Molokai_HI", "CentralPark_NY", "Waterhole_WA"))) |>
+  ggplot(aes(x = name, y = tmax)) +
+  geom_violin(aes(fill = name), color = "blue", alpha = 0.5) +
+  theme(legend.position = "bottom")
+
+# The following pipeline reorders `name` according to `tmax` values in each name using `fct_reorder`
+
+weather_df |>
+  mutate(name = forcats::fct_reorder(name, tmax)) |> 
+  ggplot(aes(x = name, y = tmax)) + 
+  geom_violin(aes(fill = name), color = "blue", alpha = .5) + 
+  theme(legend.position = "bottom")
+
+# Ordering determines the "reference" category and is something can be adjusted as needed.
+
+weather_df |>
+  lm(tmax ~ name, data = _) # `_` is a placeholder for the result of the preceding call.
+
+weather_df |>
+  mutate(name = forcats::fct_relevel(name, c("Molokai_HI", "CentralPark_NY", "Waterhole_WA"))) |> 
+  lm(tmax ~ name, data = _)
+```
+
+# PULSE Data Example
+
+```{r}
+
+# The code below updates the data processing pipeline for the PULSE data using stringr and forcats. The result is the same, and the differences are pretty small, but this is a bit cleaner.
+
+pulse_data = 
+  haven::read_sas("./data/public_pulse_data.sas7bdat") |>
+  janitor::clean_names() |>
+  pivot_longer(
+    bdi_score_bl:bdi_score_12m,
+    names_to = "visit", 
+    names_prefix = "bdi_score_",
+    values_to = "bdi") |>
+  select(id, visit, everything()) |>
+  mutate(
+    visit = str_replace(visit, "bl", "00m"),
+    visit = factor(visit)) |>
+  arrange(id, visit)
+
+print(pulse_data, n = 12)
+```
+
+# AirBNB Example
+
+```{r}
+
+# We could also use factors in an exploratory analysis of the Airbnb data, for example when looking at the distribution of prices in various neighborhoods. Ordering these according to the median price makes for clearer plots than ordering neighborhoods alphabetically.
+
+data("nyc_airbnb")
+
+nyc_airbnb |>
+  filter(neighbourhood_group == "Manhattan") |> 
+  mutate(
+    neighbourhood = fct_reorder(neighbourhood, price)) |> 
+  ggplot(aes(x = neighbourhood, y = price)) +
+  geom_boxplot() +
+  coord_flip() + 
+  ylim(0, 1000)
+```
